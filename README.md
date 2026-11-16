@@ -90,8 +90,8 @@ El núcleo de **CONTRATO CHECK** fue desarrollado en **Python** como lenguaje pr
 | Componente | Tecnología implementada | Función en CONTRATO CHECK |
 |---|---|---|
 | **Lenguaje Core** | **Python (>=3.9)** | Lenguaje principal del proyecto. Ejecuta la lógica jurídica, la validación de condiciones de validez contractual y el cálculo ponderado del índice de riesgo. |
-| **Aplicación e Interfaz** | **Streamlit (`app.py`)** | Framework de Python que genera una interfaz web interactiva, moderna y con modo oscuro para cargar contratos, ejecutar el análisis en tiempo real y mostrar estadísticas visuales. |
-| **Dependencias** | **`requirements.txt`** | Archivo estándar de Python que define las dependencias del proyecto (`streamlit>=1.28.0`) para instalación inmediata con `pip install -r requirements.txt`. |
+| **Aplicación e Interfaz** | **Streamlit (`app.py`)** | Framework de Python que genera una interfaz web interactiva, moderna y con modo oscuro para cargar o subir contratos (.txt, .pdf, .docx), ejecutar el análisis en tiempo real y mostrar estadísticas visuales. |
+| **Dependencias** | **`requirements.txt`** | Archivo estándar de Python con las dependencias del proyecto (`streamlit>=1.28.0`, `pypdf>=3.17.0`) para instalación inmediata con `pip install -r requirements.txt`. |
 | **Motor de Análisis Normativo** | **Python Scripting (`analizar_contrato`)** | Escáner algorítmico en Python que contrasta el texto del contrato con las disposiciones prohibitivas y obligatorias de la legislación colombiana (depósitos, topes de IPC, preavisos, reparaciones y penalidades). |
 | **Corpus Jurídico** | **Markdown en `corpus/`** | Repositorio estructurado de fuentes normativas públicas colombianas: Ley 820 de 2003 (régimen de vivienda urbana) y Código Civil (obligaciones y arrendamiento). |
 | **Cliente Web Alternativo** | **HTML5 + CSS3 + JS (`index.html`, `app.js`, `styles.css`)** | Versión complementaria basada en navegador cliente para facilitar ejecución estática sin servidor y despliegue alternativo en Vercel. |

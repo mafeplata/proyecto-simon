@@ -68,14 +68,31 @@
                         </select>
                     </div>
 
+                    <!-- File Uploader -->
                     <div class="form-group">
-                        <div class="label-with-action">
-                            <label for="contract-text">Texto del Contrato</label>
-                            <button type="button" id="btn-load-sample" class="btn-text">
-                                ✨ Cargar contrato de prueba con riesgos
-                            </button>
+                        <label for="contract-file">📁 Subir archivo de contrato (.txt, .pdf, .docx, .md)</label>
+                        <div class="file-upload-box" id="drop-zone">
+                            <input type="file" id="contract-file" accept=".txt,.pdf,.docx,.doc,.md" class="file-input">
+                            <div class="file-upload-label" id="file-upload-label">
+                                <span class="upload-icon">📄</span>
+                                <span id="file-label-text">Haz clic o arrastra un archivo aquí</span>
+                            </div>
                         </div>
-                        <textarea id="contract-text" class="form-control" rows="12" placeholder="Pega aquí el texto completo de tu contrato o carga un borrador..." required></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <div class="label-with-action btn-actions-row">
+                            <label for="contract-text">Texto del Contrato</label>
+                            <div>
+                                <button type="button" id="btn-load-sample" class="btn-text">
+                                    ✨ Cargar muestra
+                                </button>
+                                <button type="button" id="btn-clear" class="btn-text-danger" style="margin-left: 8px;">
+                                    🗑️ Limpiar
+                                </button>
+                            </div>
+                        </div>
+                        <textarea id="contract-text" class="form-control" rows="10" placeholder="Pega aquí el texto completo de tu contrato o súbelo en un archivo arriba..."></textarea>
                     </div>
 
                     <div class="form-actions">

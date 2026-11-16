@@ -9,7 +9,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const contractForm = document.getElementById('contract-form');
     const contractType = document.getElementById('contract-type');
     const contractText = document.getElementById('contract-text');
+    const contractFile = document.getElementById('contract-file');
+    const fileLabelText = document.getElementById('file-label-text');
     const btnLoadSample = document.getElementById('btn-load-sample');
+    const btnClear = document.getElementById('btn-clear');
     const btnAnalyze = document.getElementById('btn-analyze');
 
     const emptyState = document.getElementById('empty-state');
@@ -48,12 +51,75 @@ SEXTA. CESIÓN: Queda totalmente prohibida la subarrienda o cesión del inmueble
 
 Firmado en Bogotá D.C. a los 10 días del mes de agosto de 2026.`;
 
+    // Reset results to initial clean empty state
+    function resetResults() {
+        emptyState.classList.remove('hidden');
+        analysisContent.classList.add('hidden');
+        loadingState.classList.add('hidden');
+    }
+
     // Load sample text when clicking the action button
     btnLoadSample.addEventListener('click', () => {
         contractType.value = 'arrendamiento';
         contractText.value = sampleContractText;
+        resetResults();
         contractText.focus();
     });
+
+    // Clear all text and uploaded file
+    if (btnClear) {
+        btnClear.addEventListener('click', () => {
+            contractText.value = '';
+            if (contractFile) contractFile.value = '';
+            if (fileLabelText) fileLabelText.textContent = 'Haz clic o arrastra un archivo aquí';
+            resetResults();
+        });
+    }
+
+    // --------------------------------------------------------------------------
+    // File Upload Handler (.txt, .md, and text documents)
+    // --------------------------------------------------------------------------
+    if (contractFile) {
+        contractFile.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            fileLabelText.textContent = `Cargando: ${file.name}...`;
+            const fileName = file.name.toLowerCase();
+
+            if (fileName.endsWith('.txt') || fileName.endsWith('.md')) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    contractText.value = event.target.result;
+                    fileLabelText.textContent = `✅ ${file.name} (${Math.round(file.size / 1024)} KB)`;
+                    resetResults();
+                };
+                reader.onerror = () => {
+                    alert('Error al leer el archivo de texto.');
+                    fileLabelText.textContent = 'Haz clic o arrastra un archivo aquí';
+                };
+                reader.readAsText(file, 'UTF-8');
+            } else {
+                // Leer como texto con limpieza de caracteres nulos
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const content = event.target.result;
+                    if (typeof content === 'string') {
+                        const cleanText = content.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ').trim();
+                        if (cleanText.length > 50) {
+                            contractText.value = cleanText;
+                            fileLabelText.textContent = `✅ ${file.name}`;
+                        } else {
+                            alert('Para archivos complejos (.docx, .pdf), te sugerimos usar la versión Python (app.py) o copiar y pegar el texto directamente.');
+                            fileLabelText.textContent = 'Haz clic o arrastra un archivo aquí';
+                        }
+                    }
+                    resetResults();
+                };
+                reader.readAsText(file, 'UTF-8');
+            }
+        });
+    }
 
     // --------------------------------------------------------------------------
     // Form Submission & Analysis Handler
@@ -64,8 +130,16 @@ Firmado en Bogotá D.C. a los 10 días del mes de agosto de 2026.`;
         const text = contractText.value.trim();
         const type = contractType.value;
 
+        // Validación estricta: NO analizar si no hay texto o es muy corto
         if (!text) {
-            alert('Por favor pega el texto de un contrato antes de analizar.');
+            alert('⚠️ Por favor pega el texto de un contrato o sube un archivo antes de analizar.');
+            resetResults();
+            return;
+        }
+
+        if (text.length < 50) {
+            alert('⚠️ El texto ingresado es demasiado corto para constituir un contrato. Por favor ingresa el texto completo de las cláusulas.');
+            resetResults();
             return;
         }
 
@@ -74,20 +148,27 @@ Firmado en Bogotá D.C. a los 10 días del mes de agosto de 2026.`;
         analysisContent.classList.add('hidden');
         loadingState.classList.remove('hidden');
 
-        // Simulate analysis scan latency (1.5 seconds)
+        // Simulate analysis scan latency (1.0 seconds)
         setTimeout(() => {
             const results = analyzeContractText(text, type);
-            renderAnalysisResults(results);
-
-            loadingState.classList.add('hidden');
-            analysisContent.classList.remove('hidden');
-        }, 1200);
+            if (results) {
+                renderAnalysisResults(results);
+                loadingState.classList.add('hidden');
+                analysisContent.classList.remove('hidden');
+            } else {
+                resetResults();
+            }
+        }, 1000);
     });
 
     // --------------------------------------------------------------------------
     // Colombian Legal Rule Engine (Normative Scanner)
     // --------------------------------------------------------------------------
     function analyzeContractText(text, type) {
+        if (!text || text.trim().length < 50) {
+            return null;
+        }
+
         const textLower = text.toLowerCase();
         const findings = [];
         const recommendations = [];
@@ -167,34 +248,36 @@ Firmado en Bogotá D.C. a los 10 días del mes de agosto de 2026.`;
             recommendations.push('Negocia fijar la cláusula penal en máximo 1 o 2 cánones de arrendamiento previa constitución en mora.');
         }
 
-        // CHECK FOR MISSING ESSENTIAL CLAUSES
-        if (!textLower.includes('inventario')) {
-            missingCount++;
-            findings.push({
-                type: 'missing',
-                title: 'ℹ️ Ausencia de acta de inventario inicial',
-                quote: 'No se menciona la elaboración de un inventario detallado del estado del bien.',
-                citation: 'Código Civil — Artículo 1996 / Buenas prácticas contractuales',
-                explanation: 'Al no incluir un inventario con fotos y estado inicial de servicios públicos, pueden cobrarte daños inexistentes al entregar.'
-            });
-            recommendations.push('Exige adjuntar un Anexo de Inventario firmado donde conste el estado de muros, pisos y servicios.');
-        }
+        // CHECK FOR MISSING ESSENTIAL CLAUSES (solo para arrendamiento con texto suficiente)
+        if (type === 'arrendamiento' && text.length >= 150) {
+            if (!textLower.includes('inventario')) {
+                missingCount++;
+                findings.push({
+                    type: 'missing',
+                    title: 'ℹ️ Ausencia de acta de inventario inicial',
+                    quote: 'No se menciona la elaboración de un inventario detallado del estado del bien.',
+                    citation: 'Código Civil — Artículo 1996 / Buenas prácticas contractuales',
+                    explanation: 'Al no incluir un inventario con fotos y estado inicial de servicios públicos, pueden cobrarte daños inexistentes al entregar.'
+                });
+                recommendations.push('Exige adjuntar un Anexo de Inventario firmado donde conste el estado de muros, pisos y servicios.');
+            }
 
-        if (!textLower.includes('servicios públicos')) {
-            missingCount++;
-            findings.push({
-                type: 'missing',
-                title: 'ℹ️ Claridad en pago de servicios públicos',
-                quote: 'Falta especificación explícita sobre quién asume los recibos de servicios.',
-                citation: 'Ley 820 de 2003 — Artículo 15',
-                explanation: 'Debe especificarse el pago de acueducto, energía, gas e internet para evitar cortes o cobros extemporáneos.'
-            });
+            if (!textLower.includes('servicios públicos') && !textLower.includes('servicios publicos')) {
+                missingCount++;
+                findings.push({
+                    type: 'missing',
+                    title: 'ℹ️ Claridad en pago de servicios públicos',
+                    quote: 'Falta especificación explícita sobre quién asume los recibos de servicios.',
+                    citation: 'Ley 820 de 2003 — Artículo 15',
+                    explanation: 'Debe especificarse el pago de acueducto, energía, gas e internet para evitar cortes o cobros extemporáneos.'
+                });
+            }
         }
 
         // Fallback default finding if text is too generic
         if (findings.length === 0) {
             findings.push({
-                type: 'warning',
+                type: 'ok',
                 title: '✔️ No se detectaron cláusulas evidentemente ilegales',
                 quote: 'Texto dentro de los parámetros contractuales generales.',
                 citation: 'Autonomía de la Voluntad (Código Civil — Art. 1602)',
@@ -206,7 +289,8 @@ Firmado en Bogotá D.C. a los 10 días del mes de agosto de 2026.`;
         // Calculate Overall Risk Score
         let riskScore = (criticalCount * 35) + (warningCount * 15) + (missingCount * 8);
         if (riskScore > 100) riskScore = 98;
-        if (riskScore === 0 && findings.length > 0) riskScore = 15;
+        if (riskScore === 0 && findings.length > 0 && findings[0].type !== 'ok') riskScore = 12;
+        else if (riskScore === 0) riskScore = 5;
 
         return {
             riskScore,

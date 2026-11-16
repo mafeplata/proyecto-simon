@@ -3,6 +3,8 @@
 # Docente: Pedro Ardila
 
 import streamlit as st
+import io
+import re
 
 # ─────────────────────────────────────────────
 # Configuración general de la página
@@ -225,9 +227,78 @@ Firmado en Bogotá D.C. a los 10 días del mes de agosto de 2026."""
 
 
 # ─────────────────────────────────────────────
+# Extractor de texto para archivos (.txt, .pdf, .docx, .md)
+# ─────────────────────────────────────────────
+def extraer_texto_archivo(archivo) -> str:
+    """Extrae el contenido de texto de un archivo cargado (.txt, .pdf, .docx, .md)."""
+    if archivo is None:
+        return ""
+    nombre = archivo.name.lower()
+    try:
+        if nombre.endswith((".txt", ".md")):
+            try:
+                return archivo.read().decode("utf-8")
+            except UnicodeDecodeError:
+                archivo.seek(0)
+                return archivo.read().decode("latin-1", errors="ignore")
+        elif nombre.endswith(".pdf"):
+            # Intentar pypdf / PyPDF2
+            try:
+                import pypdf
+                reader = pypdf.PdfReader(archivo)
+                paginas = [p.extract_text() or "" for p in reader.pages]
+                return "\n\n".join(p for p in paginas if p.strip())
+            except ImportError:
+                try:
+                    import PyPDF2
+                    reader = PyPDF2.PdfReader(archivo)
+                    paginas = [p.extract_text() or "" for p in reader.pages]
+                    return "\n\n".join(p for p in paginas if p.strip())
+                except ImportError:
+                    # Heurística para PDF de texto sin librerías externas
+                    archivo.seek(0)
+                    raw = archivo.read()
+                    matches = re.findall(rb"\(([\w\s\.,;:/\-áéíóúñÁÉÍÓÚÑ\$%]+)\)", raw)
+                    if matches:
+                        return b" ".join(matches).decode("latin-1", errors="ignore")
+                    return ""
+        elif nombre.endswith(".docx"):
+            # docx es un archivo zip con word/document.xml
+            import zipfile
+            import xml.etree.ElementTree as ET
+            try:
+                archivo.seek(0)
+                with zipfile.ZipFile(archivo) as z:
+                    xml_content = z.read("word/document.xml")
+                    tree = ET.fromstring(xml_content)
+                    ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                    parrafos = []
+                    for p in tree.iter(f"{{{ns}}}p"):
+                        textos = [node.text for node in p.iter(f"{{{ns}}}t") if node.text]
+                        if textos:
+                            parrafos.append("".join(textos))
+                    return "\n\n".join(parrafos)
+            except Exception:
+                try:
+                    import docx
+                    archivo.seek(0)
+                    doc = docx.Document(archivo)
+                    return "\n\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+                except Exception:
+                    return ""
+    except Exception as e:
+        st.error(f"Error al leer el archivo: {e}")
+        return ""
+    return ""
+
+
+# ─────────────────────────────────────────────
 # Motor de análisis jurídico normativo
 # ─────────────────────────────────────────────
 def analizar_contrato(texto: str, tipo: str) -> dict:
+    if not texto or len(texto.strip()) < 50:
+        return None
+
     texto_lower = texto.lower()
     hallazgos = []
     recomendaciones = []
@@ -300,7 +371,7 @@ def analizar_contrato(texto: str, tipo: str) -> dict:
             "cita_texto": "El arrendatario asume reparaciones estructurales o vicios ocultos de construcción.",
             "fuente": "Código Civil colombiano — Artículo 1985: El arrendador está obligado a realizar las reparaciones necesarias no locativas para el uso normal del inmueble."
         })
-        recomendaciones.append(
+        recommendaciones.append(
             "Aclara que las reparaciones locativas por uso normal son del arrendatario, "
             "pero las estructurales, de tuberías internas y vicios ocultos son obligación del propietario."
         )
@@ -350,36 +421,37 @@ def analizar_contrato(texto: str, tipo: str) -> dict:
             "cuando el arrendatario esté previamente constituido en mora."
         )
 
-    # VERIFICACIÓN: Cláusulas esenciales faltantes
-    if "inventario" not in texto_lower:
-        faltantes += 1
-        hallazgos.append({
-            "tipo": "missing",
-            "titulo": "ℹ️ Falta: Acta de inventario inicial del inmueble",
-            "explicacion": (
-                "Sin un inventario firmado con el estado inicial del inmueble (paredes, pisos, "
-                "servicios públicos), el arrendador podría cobrarte daños preexistentes al momento de entrega."
-            ),
-            "cita_texto": "No se menciona la elaboración de un acta de inventario inicial.",
-            "fuente": "Código Civil — Artículo 1996 y buenas prácticas contractuales colombianas."
-        })
-        recomendaciones.append(
-            "Exige un Anexo de Inventario firmado por ambas partes con fotos y descripción "
-            "del estado de muros, pisos, baños y servicios públicos al inicio del contrato."
-        )
+    # VERIFICACIÓN: Cláusulas esenciales faltantes (solo para arrendamiento con texto suficiente)
+    if tipo == "arrendamiento" and len(texto.strip()) >= 150:
+        if "inventario" not in texto_lower:
+            faltantes += 1
+            hallazgos.append({
+                "tipo": "missing",
+                "titulo": "ℹ️ Falta: Acta de inventario inicial del inmueble",
+                "explicacion": (
+                    "Sin un inventario firmado con el estado inicial del inmueble (paredes, pisos, "
+                    "servicios públicos), el arrendador podría cobrarte daños preexistentes al momento de entrega."
+                ),
+                "cita_texto": "No se menciona la elaboración de un acta de inventario inicial.",
+                "fuente": "Código Civil — Artículo 1996 y buenas prácticas contractuales colombianas."
+            })
+            recomendaciones.append(
+                "Exige un Anexo de Inventario firmado por ambas partes con fotos y descripción "
+                "del estado de muros, pisos, baños y servicios públicos al inicio del contrato."
+            )
 
-    if "servicios públicos" not in texto_lower and "servicios publicos" not in texto_lower:
-        faltantes += 1
-        hallazgos.append({
-            "tipo": "missing",
-            "titulo": "ℹ️ Falta: Responsabilidad sobre servicios públicos",
-            "explicacion": (
-                "El contrato no especifica quién paga los servicios públicos (agua, luz, gas, internet). "
-                "Esto puede generar cobros o cortes inesperados."
-            ),
-            "cita_texto": "No hay cláusula que asigne la responsabilidad de pago de servicios domiciliarios.",
-            "fuente": "Ley 820 de 2003 — Artículo 15: Obligaciones del arrendatario respecto a servicios públicos."
-        })
+        if "servicios públicos" not in texto_lower and "servicios publicos" not in texto_lower:
+            faltantes += 1
+            hallazgos.append({
+                "tipo": "missing",
+                "titulo": "ℹ️ Falta: Responsabilidad sobre servicios públicos",
+                "explicacion": (
+                    "El contrato no especifica quién paga los servicios públicos (agua, luz, gas, internet). "
+                    "Esto puede generar cobros o cortes inesperados."
+                ),
+                "cita_texto": "No hay cláusula que asigne la responsabilidad de pago de servicios domiciliarios.",
+                "fuente": "Ley 820 de 2003 — Artículo 15: Obligaciones del arrendatario respecto a servicios públicos."
+            })
 
     # Caso sin hallazgos evidentes
     if not hallazgos:
@@ -400,8 +472,10 @@ def analizar_contrato(texto: str, tipo: str) -> dict:
 
     # Puntaje de riesgo general
     puntaje = min(98, criticos * 35 + advertencias * 15 + faltantes * 8)
-    if puntaje == 0 and hallazgos:
+    if puntaje == 0 and hallazgos and hallazgos[0]["tipo"] != "ok":
         puntaje = 12
+    elif puntaje == 0:
+        puntaje = 5
 
     return {
         "puntaje": puntaje,
@@ -411,6 +485,19 @@ def analizar_contrato(texto: str, tipo: str) -> dict:
         "hallazgos": hallazgos,
         "recomendaciones": recomendaciones,
     }
+
+
+# ─────────────────────────────────────────────
+# GESTIÓN DE ESTADO (SESSION STATE)
+# ─────────────────────────────────────────────
+if "texto_contrato" not in st.session_state:
+    st.session_state["texto_contrato"] = ""
+
+if "resultado_analisis" not in st.session_state:
+    st.session_state["resultado_analisis"] = None
+
+if "ultimo_archivo" not in st.session_state:
+    st.session_state["ultimo_archivo"] = None
 
 
 # ─────────────────────────────────────────────
@@ -462,126 +549,178 @@ with col_izq:
         key="tipo_contrato"
     )
 
-    if st.button("✨ Cargar contrato de prueba con riesgos reales"):
-        st.session_state["texto_contrato"] = CONTRATO_MUESTRA
-        st.rerun()
-
-    texto = st.text_area(
-        "Texto del Contrato",
-        value=st.session_state.get("texto_contrato", ""),
-        placeholder="Pega aquí el texto completo de tu contrato...",
-        height=350,
-        key="textarea_contrato",
-        label_visibility="visible"
+    # 1. Carga de archivo
+    archivo_subido = st.file_uploader(
+        "📁 Subir archivo de contrato (.txt, .pdf, .docx, .md)",
+        type=["txt", "pdf", "docx", "md"],
+        help="Carga un archivo y su contenido se colocará automáticamente en el área de texto."
     )
 
+    if archivo_subido is not None:
+        if st.session_state.get("ultimo_archivo") != archivo_subido.name:
+            texto_extraido = extraer_texto_archivo(archivo_subido)
+            if texto_extraido.strip():
+                st.session_state["texto_contrato"] = texto_extraido
+                st.session_state["ultimo_archivo"] = archivo_subido.name
+                st.session_state["resultado_analisis"] = None
+                st.success(f"✅ Archivo cargado con éxito: **{archivo_subido.name}** ({len(texto_extraido):,} caracteres)")
+                st.rerun()
+            else:
+                st.warning("⚠️ No se pudo extraer texto del archivo o está vacío. Intenta copiar y pegar el texto directamente.")
+
+    # 2. Botones de acción rápida
+    btn_col1, btn_col2 = st.columns([3, 2])
+    with btn_col1:
+        if st.button("✨ Cargar contrato de muestra"):
+            st.session_state["texto_contrato"] = CONTRATO_MUESTRA
+            st.session_state["resultado_analisis"] = None
+            st.rerun()
+
+    with btn_col2:
+        if st.button("🗑️ Limpiar todo"):
+            st.session_state["texto_contrato"] = ""
+            st.session_state["resultado_analisis"] = None
+            st.session_state["ultimo_archivo"] = None
+            st.rerun()
+
+    # 3. Área de texto
+    texto_ingresado = st.text_area(
+        "Texto del Contrato",
+        value=st.session_state.get("texto_contrato", ""),
+        placeholder="Pega aquí el texto completo de tu contrato o súbelo en un archivo arriba...",
+        height=320,
+        key="textarea_contrato_input"
+    )
+
+    # Actualizar estado si el usuario editó directamente en el text_area
+    if texto_ingresado != st.session_state.get("texto_contrato", ""):
+        st.session_state["texto_contrato"] = texto_ingresado
+        # Si borró todo el texto, limpiar también el diagnóstico
+        if not texto_ingresado.strip():
+            st.session_state["resultado_analisis"] = None
+
+    # 4. Botón de análisis
     analizar = st.button("🔍 Analizar Riesgos Jurídicos", use_container_width=True)
+
+    if analizar:
+        texto_actual = st.session_state.get("texto_contrato", "").strip()
+        if not texto_actual:
+            st.warning("⚠️ No has ingresado ningún contrato. Por favor pega el texto o sube un archivo antes de analizar.")
+            st.session_state["resultado_analisis"] = None
+        elif len(texto_actual) < 50:
+            st.warning("⚠️ El texto ingresado es demasiado corto para constituir un contrato. Por favor ingresa el texto completo de las cláusulas.")
+            st.session_state["resultado_analisis"] = None
+        else:
+            with st.spinner("Contrastando cláusulas con la Ley 820 de 2003 y el Código Civil..."):
+                resultado = analizar_contrato(texto_actual, tipo)
+                st.session_state["resultado_analisis"] = resultado
 
 # ─── Panel de resultados ───
 with col_der:
     st.markdown("### 📊 2. Diagnóstico Jurídico")
 
-    texto_final = st.session_state.get("texto_contrato", texto) if not texto else texto
+    resultado = st.session_state.get("resultado_analisis")
+    texto_actual = st.session_state.get("texto_contrato", "").strip()
 
-    if not analizar and not texto_final.strip():
-        st.info("📜 Pega tu contrato a la izquierda o carga el **contrato de prueba** para ver el análisis jurídico.")
+    # Si no hay análisis activo o el texto fue borrado, mostrar estado inicial limpio
+    if not resultado or not texto_actual:
+        st.info(
+            "📜 **Listo para evaluar**\n\n"
+            "Pega tu contrato a la izquierda, **sube un archivo** (.txt, .pdf, .docx) o carga el "
+            "**contrato de muestra** y presiona **'Analizar Riesgos Jurídicos'** para ver el informe."
+        )
 
-    elif analizar or texto_final.strip():
-        if not texto_final.strip():
-            st.warning("Por favor pega el texto de un contrato antes de analizar.")
+    else:
+        # Semáforo de riesgo
+        p = resultado["puntaje"]
+        if p >= 60:
+            nivel_emoji = "🔴"
+            nivel_texto = "RIESGO ALTO"
+            nivel_color = "#ef4444"
+        elif p >= 25:
+            nivel_emoji = "🟡"
+            nivel_texto = "RIESGO MEDIO"
+            nivel_color = "#f59e0b"
         else:
-            resultado = analizar_contrato(texto_final, tipo)
+            nivel_emoji = "🟢"
+            nivel_texto = "RIESGO BAJO"
+            nivel_color = "#10b981"
 
-            # Semáforo de riesgo
-            p = resultado["puntaje"]
-            if p >= 60:
-                nivel_emoji = "🔴"
-                nivel_texto = "RIESGO ALTO"
-                nivel_color = "#ef4444"
-            elif p >= 25:
-                nivel_emoji = "🟡"
-                nivel_texto = "RIESGO MEDIO"
-                nivel_color = "#f59e0b"
-            else:
-                nivel_emoji = "🟢"
-                nivel_texto = "RIESGO BAJO"
-                nivel_color = "#10b981"
+        st.markdown(f"""
+        <div style="background:rgba(0,0,0,0.2);border:1px solid #26334d;border-radius:12px;padding:16px;margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-family:'Outfit',sans-serif;font-size:1.1rem;font-weight:700;">
+                    {nivel_emoji} Nivel de Riesgo Global
+                </span>
+                <span style="background:rgba(0,0,0,0.3);color:{nivel_color};border:1px solid {nivel_color}40;
+                       padding:4px 14px;border-radius:9999px;font-weight:700;font-size:0.85rem;">
+                    {nivel_texto}
+                </span>
+            </div>
+            <div style="font-family:'Outfit',sans-serif;font-size:2.5rem;font-weight:800;color:{nivel_color};margin:8px 0 0 0;">
+                {p}%
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
+        # Estadísticas
+        c1, c2, c3 = st.columns(3)
+        with c1:
             st.markdown(f"""
-            <div style="background:rgba(0,0,0,0.2);border:1px solid #26334d;border-radius:12px;padding:16px;margin-bottom:16px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <span style="font-family:'Outfit',sans-serif;font-size:1.1rem;font-weight:700;">
-                        {nivel_emoji} Nivel de Riesgo Global
-                    </span>
-                    <span style="background:rgba(0,0,0,0.3);color:{nivel_color};border:1px solid {nivel_color}40;
-                           padding:4px 14px;border-radius:9999px;font-weight:700;font-size:0.85rem;">
-                        {nivel_texto}
-                    </span>
-                </div>
-                <div style="font-family:'Outfit',sans-serif;font-size:2.5rem;font-weight:800;color:{nivel_color};margin:8px 0 0 0;">
-                    {p}%
-                </div>
+            <div class="stat-box">
+                <div style="font-size:0.72rem;color:#94a3b8;font-weight:600;text-transform:uppercase;">Alertas Críticas</div>
+                <div style="font-size:1.8rem;font-weight:800;color:#ef4444;">{resultado['criticos']}</div>
+                <div style="font-size:0.7rem;color:#64748b;">Cláusulas ilegales</div>
+            </div>""", unsafe_allow_html=True)
+        with c2:
+            st.markdown(f"""
+            <div class="stat-box">
+                <div style="font-size:0.72rem;color:#94a3b8;font-weight:600;text-transform:uppercase;">Advertencias</div>
+                <div style="font-size:1.8rem;font-weight:800;color:#f59e0b;">{resultado['advertencias']}</div>
+                <div style="font-size:0.7rem;color:#64748b;">Cláusulas riesgosas</div>
+            </div>""", unsafe_allow_html=True)
+        with c3:
+            st.markdown(f"""
+            <div class="stat-box">
+                <div style="font-size:0.72rem;color:#94a3b8;font-weight:600;text-transform:uppercase;">Faltantes</div>
+                <div style="font-size:1.8rem;font-weight:800;color:#06b6d4;">{resultado['faltantes']}</div>
+                <div style="font-size:0.7rem;color:#64748b;">Cláusulas esenciales</div>
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown("#### 📋 Hallazgos con Citas Jurídicas")
+
+        clases = {
+            "critical": "finding-critical",
+            "warning":  "finding-warning",
+            "missing":  "finding-missing",
+            "ok":       "finding-ok",
+        }
+
+        for h in resultado["hallazgos"]:
+            css = clases.get(h["tipo"], "finding-ok")
+            st.markdown(f"""
+            <div class="{css}">
+                <div class="finding-title">{h['titulo']}</div>
+                <div class="finding-explanation">{h['explicacion']}</div>
+                <div class="finding-quote">"{h['cita_texto']}"</div>
+                <div class="finding-citation">📌 <strong>Fuente:</strong> {h['fuente']}</div>
             </div>
             """, unsafe_allow_html=True)
 
-            # Estadísticas
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.markdown(f"""
-                <div class="stat-box">
-                    <div style="font-size:0.72rem;color:#94a3b8;font-weight:600;text-transform:uppercase;">Alertas Críticas</div>
-                    <div style="font-size:1.8rem;font-weight:800;color:#ef4444;">{resultado['criticos']}</div>
-                    <div style="font-size:0.7rem;color:#64748b;">Cláusulas ilegales</div>
-                </div>""", unsafe_allow_html=True)
-            with c2:
-                st.markdown(f"""
-                <div class="stat-box">
-                    <div style="font-size:0.72rem;color:#94a3b8;font-weight:600;text-transform:uppercase;">Advertencias</div>
-                    <div style="font-size:1.8rem;font-weight:800;color:#f59e0b;">{resultado['advertencias']}</div>
-                    <div style="font-size:0.7rem;color:#64748b;">Cláusulas riesgosas</div>
-                </div>""", unsafe_allow_html=True)
-            with c3:
-                st.markdown(f"""
-                <div class="stat-box">
-                    <div style="font-size:0.72rem;color:#94a3b8;font-weight:600;text-transform:uppercase;">Faltantes</div>
-                    <div style="font-size:1.8rem;font-weight:800;color:#06b6d4;">{resultado['faltantes']}</div>
-                    <div style="font-size:0.7rem;color:#64748b;">Cláusulas esenciales</div>
-                </div>""", unsafe_allow_html=True)
-
-            st.markdown("#### 📋 Hallazgos con Citas Jurídicas")
-
-            clases = {
-                "critical": "finding-critical",
-                "warning":  "finding-warning",
-                "missing":  "finding-missing",
-                "ok":       "finding-ok",
-            }
-
-            for h in resultado["hallazgos"]:
-                css = clases.get(h["tipo"], "finding-ok")
-                st.markdown(f"""
-                <div class="{css}">
-                    <div class="finding-title">{h['titulo']}</div>
-                    <div class="finding-explanation">{h['explicacion']}</div>
-                    <div class="finding-quote">"{h['cita_texto']}"</div>
-                    <div class="finding-citation">📌 <strong>Fuente:</strong> {h['fuente']}</div>
+        # Recomendaciones
+        if resultado["recomendaciones"]:
+            recs_html = "".join(
+                f"<li style='margin-bottom:6px;color:#fef3c7;font-size:0.88rem;'>➔ {r}</li>"
+                for r in resultado["recomendaciones"]
+            )
+            st.markdown(f"""
+            <div class="recommendations-box">
+                <div style="color:#f59e0b;font-weight:700;font-size:0.95rem;margin-bottom:10px;">
+                    💡 Recomendaciones para Negociar
                 </div>
-                """, unsafe_allow_html=True)
-
-            # Recomendaciones
-            if resultado["recomendaciones"]:
-                recs_html = "".join(
-                    f"<li style='margin-bottom:6px;color:#fef3c7;font-size:0.88rem;'>➔ {r}</li>"
-                    for r in resultado["recomendaciones"]
-                )
-                st.markdown(f"""
-                <div class="recommendations-box">
-                    <div style="color:#f59e0b;font-weight:700;font-size:0.95rem;margin-bottom:10px;">
-                        💡 Recomendaciones para Negociar
-                    </div>
-                    <ul style="list-style:none;padding:0;margin:0;">{recs_html}</ul>
-                </div>
-                """, unsafe_allow_html=True)
+                <ul style="list-style:none;padding:0;margin:0;">{recs_html}</ul>
+            </div>
+            """, unsafe_allow_html=True)
 
 st.divider()
 

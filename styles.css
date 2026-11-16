@@ -604,3 +604,65 @@ textarea.form-control {
     font-size: 0.8rem;
     margin-top: 4px;
 }
+
+/* File Uploader Styles */
+.file-upload-box {
+    position: relative;
+    border: 2px dashed var(--border);
+    border-radius: var(--radius-md);
+    background-color: var(--bg-input);
+    padding: 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.file-upload-box:hover {
+    border-color: var(--primary);
+    background-color: rgba(59, 130, 246, 0.05);
+}
+
+.file-input {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.file-upload-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.88rem;
+    color: var(--text-muted);
+}
+
+.upload-icon {
+    font-size: 1.5rem;
+}
+
+.btn-actions-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.btn-text-danger {
+    background: none;
+    border: none;
+    color: var(--danger);
+    font-size: 0.82rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    transition: all 0.2s;
+}
+
+.btn-text-danger:hover {
+    background: var(--danger-bg);
+}
