@@ -289,12 +289,11 @@ def extraer_texto_archivo(archivo) -> str:
                     except Exception:
                         data = s
                     if data:
-                        t_matches = re.findall(rb"\(([\w\s\.,;:/\-áéíóúñÁÉÍÓÚÑ$%]+)\)", data)
+                        texto_stream = data.decode("latin-1", errors="ignore")
+                        t_matches = re.findall(r"\(([\w\s\.,;:/\-áéíóúñÁÉÍÓÚÑ$%]+)\)", texto_stream)
                         for tm in t_matches:
-                            try:
-                                chunks.append(tm.decode("latin-1"))
-                            except Exception:
-                                pass
+                            if tm.strip():
+                                chunks.append(tm.strip())
                 if chunks:
                     return " ".join(chunks)
             except Exception:
