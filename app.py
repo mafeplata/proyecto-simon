@@ -235,48 +235,99 @@ def extraer_texto_archivo(archivo) -> str:
         return ""
     nombre = archivo.name.lower()
     try:
+        # 1. Archivos de texto plano (.txt, .md)
         if nombre.endswith((".txt", ".md")):
-            try:
-                return archivo.read().decode("utf-8")
-            except UnicodeDecodeError:
-                archivo.seek(0)
-                return archivo.read().decode("latin-1", errors="ignore")
+            archivo.seek(0)
+            contenido = archivo.read()
+            if isinstance(contenido, str):
+                return contenido
+            for enc in ["utf-8", "latin-1", "cp1252", "iso-8859-1"]:
+                try:
+                    return contenido.decode(enc)
+                except Exception:
+                    pass
+            return contenido.decode("utf-8", errors="ignore")
+
+        # 2. Archivos PDF (.pdf)
         elif nombre.endswith(".pdf"):
-            # Intentar pypdf / PyPDF2
+            archivo.seek(0)
+            # Intentar con pypdf
             try:
                 import pypdf
+                archivo.seek(0)
                 reader = pypdf.PdfReader(archivo)
                 paginas = [p.extract_text() or "" for p in reader.pages]
-                return "\n\n".join(p for p in paginas if p.strip())
+                texto = "\n\n".join(p for p in paginas if p.strip())
+                if texto.strip():
+                    return texto
             except Exception:
-                try:
-                    import PyPDF2
-                    reader = PyPDF2.PdfReader(archivo)
-                    paginas = [p.extract_text() or "" for p in reader.pages]
-                    return "\n\n".join(p for p in paginas if p.strip())
-                except Exception:
-                    # Heurística para PDF de texto decodificando primero a string
-                    archivo.seek(0)
-                    raw_str = archivo.read().decode("latin-1", errors="ignore")
-                    matches = re.findall(r"\(([\w\s\.,;:/\-áéíóúñÁÉÍÓÚÑ$%]+)\)", raw_str)
-                    if matches:
-                        return " ".join(matches)
-                    return ""
+                pass
+
+            # Intentar con PyPDF2
+            try:
+                import PyPDF2
+                archivo.seek(0)
+                reader = PyPDF2.PdfReader(archivo)
+                paginas = [p.extract_text() or "" for p in reader.pages]
+                texto = "\n\n".join(p for p in paginas if p.strip())
+                if texto.strip():
+                    return texto
+            except Exception:
+                pass
+
+            # Intentar descompresión zlib nativa de streams de texto PDF
+            try:
+                import zlib
+                archivo.seek(0)
+                raw = archivo.read()
+                matches = re.findall(rb"stream[\r\n]+(.*?)[\r\n]+endstream", raw, re.DOTALL)
+                chunks = []
+                for s in matches:
+                    data = None
+                    try:
+                        data = zlib.decompress(s)
+                    except Exception:
+                        data = s
+                    if data:
+                        t_matches = re.findall(rb"\(([\w\s\.,;:/\-áéíóúñÁÉÍÓÚÑ$%]+)\)", data)
+                        for tm in t_matches:
+                            try:
+                                chunks.append(tm.decode("latin-1"))
+                            except Exception:
+                                pass
+                if chunks:
+                    return " ".join(chunks)
+            except Exception:
+                pass
+
+            # Heurística en texto plano
+            try:
+                archivo.seek(0)
+                raw_str = archivo.read().decode("latin-1", errors="ignore")
+                matches = re.findall(r"\(([\w\s\.,;:/\-áéíóúñÁÉÍÓÚÑ$%]+)\)", raw_str)
+                if matches:
+                    return " ".join(matches)
+            except Exception:
+                pass
+
+            return ""
+
+        # 3. Archivos de Word (.docx)
         elif nombre.endswith(".docx"):
-            # docx es un archivo zip con word/document.xml
+            archivo.seek(0)
             import zipfile
             import xml.etree.ElementTree as ET
             try:
-                archivo.seek(0)
-                with zipfile.ZipFile(archivo) as z:
+                bytes_io = io.BytesIO(archivo.read())
+                with zipfile.ZipFile(bytes_io) as z:
                     xml_content = z.read("word/document.xml")
                     tree = ET.fromstring(xml_content)
-                    ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
                     parrafos = []
-                    for p in tree.iter(f"{{{ns}}}p"):
-                        textos = [node.text for node in p.iter(f"{{{ns}}}t") if node.text]
-                        if textos:
-                            parrafos.append("".join(textos))
+                    for elem in tree.iter():
+                        if elem.tag.endswith("}p") or elem.tag == "p":
+                            p_text = "".join(t.text for t in elem.iter() if (t.tag.endswith("}t") or t.tag == "t") and t.text)
+                            if p_text.strip():
+                                parrafos.append(p_text.strip())
                     return "\n\n".join(parrafos)
             except Exception:
                 try:
@@ -286,6 +337,7 @@ def extraer_texto_archivo(archivo) -> str:
                     return "\n\n".join([p.text for p in doc.paragraphs if p.text.strip()])
                 except Exception:
                     return ""
+
     except Exception as e:
         st.error(f"Error al leer el archivo: {e}")
         return ""
@@ -559,47 +611,49 @@ with col_izq:
     if archivo_subido is not None:
         if st.session_state.get("ultimo_archivo") != archivo_subido.name:
             texto_extraido = extraer_texto_archivo(archivo_subido)
-            if texto_extraido.strip():
+            if texto_extraido and texto_extraido.strip():
                 st.session_state["texto_contrato"] = texto_extraido
                 st.session_state["ultimo_archivo"] = archivo_subido.name
                 st.session_state["resultado_analisis"] = None
-                st.success(f"✅ Archivo cargado con éxito: **{archivo_subido.name}** ({len(texto_extraido):,} caracteres)")
                 st.rerun()
             else:
-                st.warning("⚠️ No se pudo extraer texto del archivo o está vacío. Intenta copiar y pegar el texto directamente.")
+                st.warning("⚠️ No se pudo extraer texto del archivo o está vacío. Puedes copiar y pegar el texto en el recuadro de abajo.")
+        else:
+            col_info, col_btn_analizar_archivo = st.columns([2, 1])
+            with col_info:
+                st.success(f"✅ Archivo cargado: **{archivo_subido.name}** ({len(st.session_state.get('texto_contrato', '')):,} car.)")
+            with col_btn_analizar_archivo:
+                if st.button("🚀 Analizar archivo", key="btn_analizar_archivo_directo", use_container_width=True):
+                    texto_actual = st.session_state.get("texto_contrato", "").strip()
+                    if texto_actual:
+                        with st.spinner("Analizando archivo subido..."):
+                            st.session_state["resultado_analisis"] = analizar_contrato(texto_actual, tipo)
+                            st.rerun()
 
     # 2. Botones de acción rápida
     btn_col1, btn_col2 = st.columns([3, 2])
     with btn_col1:
-        if st.button("✨ Cargar contrato de muestra"):
+        if st.button("✨ Cargar contrato de muestra", use_container_width=True):
             st.session_state["texto_contrato"] = CONTRATO_MUESTRA
             st.session_state["resultado_analisis"] = None
             st.rerun()
 
     with btn_col2:
-        if st.button("🗑️ Limpiar todo"):
+        if st.button("🗑️ Limpiar todo", use_container_width=True):
             st.session_state["texto_contrato"] = ""
             st.session_state["resultado_analisis"] = None
             st.session_state["ultimo_archivo"] = None
             st.rerun()
 
-    # 3. Área de texto
+    # 3. Área de texto (vinculada directamente a st.session_state["texto_contrato"])
     texto_ingresado = st.text_area(
         "Texto del Contrato",
-        value=st.session_state.get("texto_contrato", ""),
         placeholder="Pega aquí el texto completo de tu contrato o súbelo en un archivo arriba...",
         height=320,
-        key="textarea_contrato_input"
+        key="texto_contrato"
     )
 
-    # Actualizar estado si el usuario editó directamente en el text_area
-    if texto_ingresado != st.session_state.get("texto_contrato", ""):
-        st.session_state["texto_contrato"] = texto_ingresado
-        # Si borró todo el texto, limpiar también el diagnóstico
-        if not texto_ingresado.strip():
-            st.session_state["resultado_analisis"] = None
-
-    # 4. Botón de análisis
+    # 4. Botón de análisis general
     analizar = st.button("🔍 Analizar Riesgos Jurídicos", use_container_width=True)
 
     if analizar:
@@ -614,6 +668,7 @@ with col_izq:
             with st.spinner("Contrastando cláusulas con la Ley 820 de 2003 y el Código Civil..."):
                 resultado = analizar_contrato(texto_actual, tipo)
                 st.session_state["resultado_analisis"] = resultado
+                st.rerun()
 
 # ─── Panel de resultados ───
 with col_der:
