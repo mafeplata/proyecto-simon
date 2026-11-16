@@ -248,19 +248,19 @@ def extraer_texto_archivo(archivo) -> str:
                 reader = pypdf.PdfReader(archivo)
                 paginas = [p.extract_text() or "" for p in reader.pages]
                 return "\n\n".join(p for p in paginas if p.strip())
-            except ImportError:
+            except Exception:
                 try:
                     import PyPDF2
                     reader = PyPDF2.PdfReader(archivo)
                     paginas = [p.extract_text() or "" for p in reader.pages]
                     return "\n\n".join(p for p in paginas if p.strip())
-                except ImportError:
-                    # Heurística para PDF de texto sin librerías externas
+                except Exception:
+                    # Heurística para PDF de texto decodificando primero a string
                     archivo.seek(0)
-                    raw = archivo.read()
-                    matches = re.findall(rb"\(([\w\s\.,;:/\-áéíóúñÁÉÍÓÚÑ\$%]+)\)", raw)
+                    raw_str = archivo.read().decode("latin-1", errors="ignore")
+                    matches = re.findall(r"\(([\w\s\.,;:/\-áéíóúñÁÉÍÓÚÑ$%]+)\)", raw_str)
                     if matches:
-                        return b" ".join(matches).decode("latin-1", errors="ignore")
+                        return " ".join(matches)
                     return ""
         elif nombre.endswith(".docx"):
             # docx es un archivo zip con word/document.xml
