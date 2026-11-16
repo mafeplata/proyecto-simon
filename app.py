@@ -632,7 +632,7 @@ with col_izq:
     # 2. Botones de acción rápida
     btn_col1, btn_col2 = st.columns([3, 2])
     with btn_col1:
-        if st.button("✨ Cargar contrato de muestra", use_container_width=True):
+        if st.button("✨ Cargar contrato", use_container_width=True):
             st.session_state["texto_contrato"] = CONTRATO_MUESTRA
             st.session_state["resultado_analisis"] = None
             st.rerun()
@@ -681,7 +681,7 @@ with col_der:
         st.info(
             "📜 **Listo para evaluar**\n\n"
             "Pega tu contrato a la izquierda, **sube un archivo** (.txt, .pdf, .docx) o carga el "
-            "**contrato de muestra** y presiona **'Analizar Riesgos Jurídicos'** para ver el informe."
+            "**contrato** y presiona **'Analizar Riesgos Jurídicos'** para ver el informe."
         )
 
     else:
